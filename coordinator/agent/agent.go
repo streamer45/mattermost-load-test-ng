@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/mattermost/mattermost-load-test-ng/api"
 	"github.com/mattermost/mattermost-load-test-ng/defaults"
 	"github.com/mattermost/mattermost-load-test-ng/loadtest"
 	"github.com/mattermost/mattermost-load-test-ng/loadtest/control/simplecontroller"
@@ -25,6 +24,15 @@ type LoadAgent struct {
 	config LoadAgentConfig
 	status *loadtest.Status
 	client *http.Client
+}
+
+// TODO: maybe move this into a shared model package.
+// agentResponse contains the data returned by load-test agent API.
+type agentResponse struct {
+	Id      string           `json:"id,omitempty"`      // The load-test agent unique identifier.
+	Message string           `json:"message,omitempty"` // Message contains information about the response.
+	Status  *loadtest.Status `json:"status,omitempty"`  // Status contains the current status of the load test.
+	Error   string           `json:"error,omitempty"`   // Error is set if there was an error during the operation.
 }
 
 var ErrAgentNotFound = errors.New("agent: not found")
@@ -45,22 +53,20 @@ func New(config LoadAgentConfig) (*LoadAgent, error) {
 func (a *LoadAgent) apiRequest(req *http.Request) error {
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("agent: failed to execute api request: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		if resp.StatusCode == http.StatusNotFound {
-			return ErrAgentNotFound
-		}
-		return fmt.Errorf("agent: bad response status code %d", resp.StatusCode)
-	}
-	res := &api.Response{}
+	var res agentResponse
 	err = json.NewDecoder(resp.Body).Decode(&res)
 	if err != nil {
-		return err
+		return fmt.Errorf("agent: failed to decode api response: %w", err)
 	}
-	if res.Error != "" {
+	if resp.StatusCode == http.StatusNotFound {
+		return ErrAgentNotFound
+	} else if res.Error != "" {
 		return fmt.Errorf("agent: api request error: %s", res.Error)
+	} else if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("agent: bad response status code %d", resp.StatusCode)
 	}
 	a.status = res.Status
 	return nil
